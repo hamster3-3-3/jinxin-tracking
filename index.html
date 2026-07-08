@@ -494,6 +494,40 @@ function monthKeyFromISO(iso){
       transition: width .2s ease;
     }
 
+
+    /* Expandable table panels: 新品超用／報廢、特定半成品追蹤 */
+    .panel-expand-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,.42);
+      z-index:65;
+      backdrop-filter:blur(2px);
+    }
+    .expand-panel.panel-expanded{
+      position:fixed;
+      inset:24px;
+      z-index:70;
+      margin:0 !important;
+      display:flex;
+      flex-direction:column;
+      box-shadow:0 20px 60px rgba(15,23,42,.28);
+      overflow:hidden;
+    }
+    .expand-panel.panel-expanded .table-wrap{
+      max-height:calc(100vh - 154px) !important;
+      flex:1 1 auto;
+    }
+    .expand-panel.panel-expanded table th,
+    .expand-panel.panel-expanded table td{
+      font-size:15px;
+      padding:14px 16px;
+    }
+    .expand-panel.panel-expanded .panel-expand-btn::after{content:"中";}
+    @media (max-width:640px){
+      .expand-panel.panel-expanded{inset:12px;}
+      .expand-panel.panel-expanded .table-wrap{max-height:calc(100vh - 132px) !important;}
+    }
+
 </style>
 
   <!-- Local vendor scripts (GitHub Pages 同網域) -->
@@ -642,15 +676,18 @@ function monthKeyFromISO(iso){
 
     <!-- New product / Top5 metric panels -->
     <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3" id="newTopPanels">
-      <div class="card p-4">
+      <div id="prevNewPanel" class="card p-4 expand-panel">
         <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
           <div>
             <div class="text-sm font-semibold">新品超用／報廢</div>
             <div id="prevNewProductSubtitle" class="text-xs muted mt-1">—</div>
           </div>
-          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
-            <button id="prevNewScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
-            <button id="prevNewOverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          <div class="flex items-center gap-2">
+            <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+              <button id="prevNewScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+              <button id="prevNewOverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+            </div>
+            <button type="button" class="seg-btn panel-expand-btn text-xs py-1.5 px-3" data-expand-for="prevNewPanel" onclick="togglePanelExpand('prevNewPanel')">放大</button>
           </div>
         </div>
         <div class="overflow-auto max-h-[280px] table-wrap">
@@ -669,15 +706,18 @@ function monthKeyFromISO(iso){
         <div id="prevNewProductEmpty" class="hidden text-sm muted py-4">此條件下無前段新品資料。</div>
       </div>
 
-      <div class="card p-4">
+      <div id="trackedPanel" class="card p-4 expand-panel">
         <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
           <div>
             <div class="text-sm font-semibold">特定半成品追蹤</div>
             <div id="top5ProductSubtitle" class="text-xs muted mt-1 hidden"></div>
           </div>
-          <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
-            <button id="top5ScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
-            <button id="top5OverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+          <div class="flex items-center gap-2">
+            <div class="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-sm">
+              <button id="top5ScrapBtn" type="button" class="px-3 py-1 rounded-full bg-slate-900 text-white">報廢</button>
+              <button id="top5OverBtn" type="button" class="px-3 py-1 rounded-full text-slate-700 hover:bg-white">超用</button>
+            </div>
+            <button type="button" class="seg-btn panel-expand-btn text-xs py-1.5 px-3" data-expand-for="trackedPanel" onclick="togglePanelExpand('trackedPanel')">放大</button>
           </div>
         </div>
         <div class="overflow-auto max-h-[280px] table-wrap">
@@ -936,6 +976,7 @@ function monthKeyFromISO(iso){
     </div>
   </div>
 
+  <div id="panelExpandBackdrop" class="panel-expand-backdrop hidden" onclick="closeExpandedPanel()"></div>
   <div id="toast" class="toast"></div>
 
 <script>
@@ -6271,21 +6312,32 @@ function summarizeTrackedSemi(rows, semiName){
   return out;
 }
 
+function jumpToSemiDetail(semi){
+  if (!semi) return;
+  if ($('productSearch')) $('productSearch').value = '';
+  if ($('semiSearch')) $('semiSearch').value = semi;
+  const {start, end} = getDateRange();
+  applyGroupFilterAndRender(filterByRange(state.details || [], start, end));
+  const target = (state.filteredGroups || []).find(r => normKey(r.semi) === normKey(semi))
+    || (state.groupRows || []).find(r => normKey(r.semi) === normKey(semi));
+  if (target) {
+    state.selectedKey = target.key;
+    renderSelectedItem();
+  } else {
+    state.selectedKey = null;
+    const panel = $('itemPanel');
+    if (panel) panel.classList.add('hidden');
+  }
+  const card = document.querySelector('#groupTbody')?.closest('.card');
+  if (card) card.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
 function bindTrackedRows(tbody){
   if (!tbody) return;
   for (const b of tbody.querySelectorAll('.js-tracked-jump')){
     b.addEventListener('click', (ev)=>{
       ev.stopPropagation();
-      const semi = b.dataset.semi || '';
-      if ($('productSearch')) $('productSearch').value = '';
-      if ($('semiSearch')) $('semiSearch').value = semi;
-      state.selectedKey = null;
-      const {start, end} = getDateRange();
-      applyGroupFilterAndRender(filterByRange(state.details || [], start, end));
-      const card = document.querySelector('#groupTbody')?.closest('.card');
-      if (card) card.scrollIntoView({behavior:'smooth', block:'start'});
-      const panel = $('itemPanel');
-      if (panel) panel.classList.add('hidden');
+      jumpToSemiDetail(b.dataset.semi || '');
     });
   }
 }
@@ -6330,14 +6382,7 @@ function renderTrackedSemiPanel(start, end, prevRange){
       <td class="text-right mono whitespace-nowrap">${fmtCompareMetric(prev[amtKey], curr[amtKey], 'amt')}</td>
     `;
     tr.addEventListener('click', ()=>{
-      if ($('productSearch')) $('productSearch').value = '';
-      if ($('semiSearch')) $('semiSearch').value = item.semi;
-      state.selectedKey = null;
-      applyGroupFilterAndRender(currDetails);
-      const card = document.querySelector('#groupTbody')?.closest('.card');
-      if (card) card.scrollIntoView({behavior:'smooth', block:'start'});
-      const panel = $('itemPanel');
-      if (panel) panel.classList.add('hidden');
+      jumpToSemiDetail(item.semi);
     });
     tbody.appendChild(tr);
   }
@@ -6380,13 +6425,19 @@ renderNewTopPanels = function(){
 };
 
 // Only render visible sections in this standalone page.
+// 保留原始「半成品展開列點擊 → 商品趨勢圖與日別明細」功能。
+const __standaloneOriginalRenderSelectedItem = renderSelectedItem;
 renderAll = function(){
   const { start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart } = getSelectedRangeRows();
   state.view = { start, end, srows, drows, srowsChart, drowsChart, augSummary, augSummaryChart };
   renderNewTopPanels();
   applyGroupFilterAndRender(drowsChart);
-  const panel = $('itemPanel');
-  if (panel) panel.classList.add('hidden');
+  if (state.selectedKey) {
+    __standaloneOriginalRenderSelectedItem();
+  } else {
+    const panel = $('itemPanel');
+    if (panel) panel.classList.add('hidden');
+  }
 };
 
 renderKPIOnly = function(){};
@@ -6394,8 +6445,7 @@ renderRightOnly = function(){};
 renderReasonCards = function(){};
 bindReasonCardClicks = function(){};
 renderSelectedItem = function(){
-  const panel = $('itemPanel');
-  if (panel) panel.classList.add('hidden');
+  return __standaloneOriginalRenderSelectedItem();
 };
 
 const __standaloneSyncModeUI = syncModeUI;
@@ -6403,6 +6453,35 @@ syncModeUI = function(){
   __standaloneSyncModeUI();
   document.querySelectorAll('button.seg-btn[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === state.mode));
 };
+
+
+function closeExpandedPanel(){
+  document.querySelectorAll('.expand-panel.panel-expanded').forEach(panel => panel.classList.remove('panel-expanded'));
+  const backdrop = document.getElementById('panelExpandBackdrop');
+  if (backdrop) backdrop.classList.add('hidden');
+  document.body.classList.remove('overflow-hidden');
+  document.querySelectorAll('.panel-expand-btn').forEach(btn => { btn.textContent = '放大'; });
+  state._expandedPanelId = null;
+}
+
+function togglePanelExpand(panelId){
+  const panel = document.getElementById(panelId);
+  const backdrop = document.getElementById('panelExpandBackdrop');
+  if (!panel || !backdrop) return;
+  const alreadyOpen = panel.classList.contains('panel-expanded');
+  closeExpandedPanel();
+  if (alreadyOpen) return;
+  panel.classList.add('panel-expanded');
+  backdrop.classList.remove('hidden');
+  document.body.classList.add('overflow-hidden');
+  const btn = document.querySelector(`.panel-expand-btn[data-expand-for="${panelId}"]`);
+  if (btn) btn.textContent = '縮小';
+  state._expandedPanelId = panelId;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state._expandedPanelId) closeExpandedPanel();
+});
 
 
 init();
