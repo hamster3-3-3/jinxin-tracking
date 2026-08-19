@@ -6261,29 +6261,51 @@ async function init(force=false) {
    - Uses the source site manifest: https://hamster3-3-3.github.io/jinxin-halfproduct/data/manifest.json
 ========================= */
 const TRACKED_SEMI_PRODUCTS = [
-  '二配川燙切片青江菜',
-  '二配川燙紅蘿蔔塊',
-  '二配奶香起司醬',
-  '二配洋蔥壹號醬',
-  '二配(V)煮鹽水G雞肉'
+  { semi: '二配川燙切片青江菜' },
+  { semi: '二配川燙紅蘿蔔塊' },
+  { semi: '二配奶香起司醬' },
+  { semi: '二配洋蔥壹號醬' },
+  { product: '二配玉米濃湯焗烤飯', semi: '二配炒火腿丁' },
+  { product: '二配美味蟹煲', semi: '二配烤鹹蛋黃碎' }
 ];
+
+function trackedSemiConfigMatch(cfg, product, semi){
+  const semiKey = normKey(semi);
+  const targetSemiKey = normKey(cfg && cfg.semi);
+  if (!semiKey || !targetSemiKey) return false;
+  if (!(semiKey === targetSemiKey || semiKey.includes(targetSemiKey) || targetSemiKey.includes(semiKey))) return false;
+
+  const targetProductKey = normKey(cfg && cfg.product);
+  if (!targetProductKey) return true;
+  const productKey = normKey(product);
+  return !!productKey && (productKey === targetProductKey || productKey.includes(targetProductKey) || targetProductKey.includes(productKey));
+}
 
 function isTrackedSemiName(semi){
   const k = normKey(semi);
-  return TRACKED_SEMI_PRODUCTS.some(x => normKey(x) === k || k.includes(normKey(x)) || normKey(x).includes(k));
+  return !!k && TRACKED_SEMI_PRODUCTS.some(cfg => {
+    const t = normKey(cfg && cfg.semi);
+    return t && (k === t || k.includes(t) || t.includes(k));
+  });
 }
 
 function trackedDisplayName(semi){
   const k = normKey(semi);
-  return TRACKED_SEMI_PRODUCTS.find(x => normKey(x) === k || k.includes(normKey(x)) || normKey(x).includes(k)) || semi || '';
+  const cfg = TRACKED_SEMI_PRODUCTS.find(x => {
+    const t = normKey(x && x.semi);
+    return k && t && (k === t || k.includes(t) || t.includes(k));
+  });
+  return cfg ? cfg.semi : (semi || '');
 }
 
-function summarizeTrackedSemi(rows, semiName){
+function summarizeTrackedSemi(rows, trackedCfg){
+  const semiName = trackedCfg && trackedCfg.semi ? trackedCfg.semi : safeStr(trackedCfg);
+  const productName = trackedCfg && trackedCfg.product ? trackedCfg.product : '';
   const targetKey = normKey(semiName);
   const out = {
-    product: '',
+    product: productName,
     semi: semiName,
-    key: '__tracked__' + targetKey,
+    key: '__tracked__' + (productName ? normKey(productName) + '__' : '') + targetKey,
     order: 0,
     scrapQty: 0,
     scrapAmt: 0,
@@ -6294,9 +6316,7 @@ function summarizeTrackedSemi(rows, semiName){
     productNames: new Set()
   };
   for (const r of rows || []){
-    const rk = normKey(r && r.semi);
-    if (!rk) continue;
-    if (!(rk === targetKey || rk.includes(targetKey) || targetKey.includes(rk))) continue;
+    if (!trackedSemiConfigMatch({ semi: semiName, product: productName || null }, r && r.product, r && r.semi)) continue;
     const prod = safeStr(r.product).trim();
     if (prod) out.productNames.add(prod);
     out.order += Number(r.order) || 0;
@@ -6306,20 +6326,22 @@ function summarizeTrackedSemi(rows, semiName){
     out.overuseAmt += Number(r.overuseAmt) || 0;
   }
   const names = Array.from(out.productNames);
-  out.product = names.length === 0 ? '—' : (names.length === 1 ? names[0] : `多商品（${names.length}）`);
+  if (!productName) out.product = names.length === 0 ? '—' : (names.length === 1 ? names[0] : `多商品（${names.length}）`);
   out.scrapRate = out.order > 0 ? out.scrapQty / out.order : 0;
   out.overuseRate = out.order > 0 ? out.overuseQty / out.order : 0;
   return out;
 }
 
-function jumpToSemiDetail(semi){
+function jumpToSemiDetail(semi, product=''){
   if (!semi) return;
-  if ($('productSearch')) $('productSearch').value = '';
+  if ($('productSearch')) $('productSearch').value = product || '';
   if ($('semiSearch')) $('semiSearch').value = semi;
   const {start, end} = getDateRange();
   applyGroupFilterAndRender(filterByRange(state.details || [], start, end));
-  const target = (state.filteredGroups || []).find(r => normKey(r.semi) === normKey(semi))
-    || (state.groupRows || []).find(r => normKey(r.semi) === normKey(semi));
+  const pKey = normKey(product);
+  const matchesTarget = (r) => normKey(r && r.semi) === normKey(semi) && (!pKey || normKey(r && r.product) === pKey);
+  const target = (state.filteredGroups || []).find(matchesTarget)
+    || (state.groupRows || []).find(matchesTarget);
   if (target) {
     state.selectedKey = target.key;
     renderSelectedItem();
@@ -6337,7 +6359,7 @@ function bindTrackedRows(tbody){
   for (const b of tbody.querySelectorAll('.js-tracked-jump')){
     b.addEventListener('click', (ev)=>{
       ev.stopPropagation();
-      jumpToSemiDetail(b.dataset.semi || '');
+      jumpToSemiDetail(b.dataset.semi || '', b.dataset.product || '');
     });
   }
 }
@@ -6351,10 +6373,11 @@ function renderTrackedSemiPanel(start, end, prevRange){
   const amtKey = metricAmtKey(mode);
   const currDetails = filterByRange(state.details || [], start, end);
   const prevDetails = prevRange ? filterByRange(state.details || [], prevRange.start, prevRange.end) : [];
-  const rows = TRACKED_SEMI_PRODUCTS.map(semi => ({
-    semi,
-    curr: summarizeTrackedSemi(currDetails, semi),
-    prev: summarizeTrackedSemi(prevDetails, semi)
+  const rows = TRACKED_SEMI_PRODUCTS.map(cfg => ({
+    semi: cfg.semi,
+    product: cfg.product || '',
+    curr: summarizeTrackedSemi(currDetails, cfg),
+    prev: summarizeTrackedSemi(prevDetails, cfg)
   }));
 
   const sub = $('top5ProductSubtitle');
@@ -6375,14 +6398,15 @@ function renderTrackedSemiPanel(start, end, prevRange){
     const prev = item.prev;
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-slate-50 cursor-pointer';
+    const displayProduct = item.product || curr.product || '—';
     tr.innerHTML = `
-      <td><button type="button" class="js-tracked-jump text-left hover:underline" data-semi="${escapeHTML(item.semi)}">${escapeHTML(curr.product || '—')}</button></td>
-      <td class="muted"><button type="button" class="js-tracked-jump text-left text-sky-700 hover:underline" data-semi="${escapeHTML(item.semi)}">${escapeHTML(item.semi)}</button></td>
+      <td><button type="button" class="js-tracked-jump text-left hover:underline" data-semi="${escapeHTML(item.semi)}" data-product="${escapeHTML(item.product || '')}">${escapeHTML(displayProduct)}</button></td>
+      <td class="muted"><button type="button" class="js-tracked-jump text-left text-sky-700 hover:underline" data-semi="${escapeHTML(item.semi)}" data-product="${escapeHTML(item.product || '')}">${escapeHTML(item.semi)}</button></td>
       <td class="text-right mono whitespace-nowrap">${fmtCompareMetric(prev[rateKey], curr[rateKey], 'rate')}</td>
       <td class="text-right mono whitespace-nowrap">${fmtCompareMetric(prev[amtKey], curr[amtKey], 'amt')}</td>
     `;
     tr.addEventListener('click', ()=>{
-      jumpToSemiDetail(item.semi);
+      jumpToSemiDetail(item.semi, item.product || '');
     });
     tbody.appendChild(tr);
   }
